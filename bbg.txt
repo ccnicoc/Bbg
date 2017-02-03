@@ -1,0 +1,674 @@
+
+#***BBG***#	
+
+#===bdp===
+
+# SimpleRefDataExample.py
+
+import blpapi
+from optparse import OptionParser
+import BBG
+import pandas as pd
+import datetime
+
+def parseCmdLine():
+    parser = OptionParser(description="Retrieve reference data.")
+    parser.add_option("-a",
+                      "--ip",
+                      dest="host",
+                      help="server name or IP (default: %default)",
+                      metavar="ipAddress",
+                      default="localhost")
+    parser.add_option("-p",
+                      dest="port",
+                      type="int",
+                      help="server port (default: %default)",
+                      metavar="tcpPort",
+                      default=8194)
+
+    (options, args) = parser.parse_args()
+
+    return options
+
+
+def bdp(SECURITY_LIST,FIELD_LIST):
+    global options
+    options = parseCmdLine()
+
+    # Fill SessionOptions
+    sessionOptions = blpapi.SessionOptions()
+    sessionOptions.setServerHost(options.host)
+    sessionOptions.setServerPort(options.port)
+
+    print "Connecting to %s:%d" % (options.host, options.port)
+
+    # Create a Session
+    session = blpapi.Session(sessionOptions)
+
+    # Start a Session
+    if not session.start():
+        print "Failed to start session."
+        return
+
+    if not session.openService("//blp/refdata"):
+        print "Failed to open //blp/refdata"
+        return
+
+    refDataService = session.getService("//blp/refdata")
+    request = refDataService.createRequest("ReferenceDataRequest")
+
+    # append securities to request
+    for x in SECURITY_LIST:
+        request.append("securities",x)
+
+    # append fields to request
+    for x in FIELD_LIST:
+        request.append("fields", x)
+    #request.append("fields", "EQY_DPS")
+
+    #print "Sending Request:", request
+    cid=session.sendRequest(request)
+    iev=0
+    session_data=['']*(len(SECURITY_LIST))
+
+    try:
+        # Process received events
+        while(True):
+            # We provide timeout to give the chance to Ctrl+C handling:
+            ev = session.nextEvent(500)
+            if ev.eventType() != blpapi.Event.RESPONSE and ev.eventType() != blpapi.Event.PARTIAL_RESPONSE:
+                continue
+            else:            
+                for msg in ev:
+                    if cid in msg.correlationIds():
+                        session_data[iev]=msg
+                        iev=iev+1                      
+            # Response completly received, so we could exit
+            if ev.eventType() == blpapi.Event.RESPONSE:
+                break
+    finally:
+        z=[x for x in session_data if x]
+        return z
+        # Stop the session
+        session.stop()
+
+def MyBDP(SECURITY_LIST,FIELD_LIST):
+    
+    try:
+        z=bdp(SECURITY_LIST,FIELD_LIST)
+    except KeyboardInterrupt:
+        print "Ctrl+C pressed. Stopping..."
+    
+    b=[['' for x in range(len(FIELD_LIST)+1)] for y in range(len(SECURITY_LIST))]
+    count=0
+    
+    for l in range(len(z)):
+        a=z[l].getElement('securityData')
+        Seq_Number=[a.getValue(i).getElement('sequenceNumber').getValue(0) for i in range(a.numValues())]
+        j=0
+        for i in range(a.numValues()):
+            j=0            
+            b[i+count][0]=Seq_Number[i]
+            for field in FIELD_LIST:
+                j=j+1                
+                try:
+                    b[i+count][j]=a.getValue(i).getElement('fieldData').getElement(field).getValue(0)
+                except Exception as e:
+                    print "Exception with "+SECURITY_LIST[b[i+count][0]]+":", e
+        count=count+a.numValues()
+    return sorted(b)
+
+def BDP_pd(SECURITY_LIST,FIELD_LIST):
+    
+    try:
+        z=bdp(SECURITY_LIST,FIELD_LIST)
+    except KeyboardInterrupt:
+        print "Ctrl+C pressed. Stopping..."
+    
+    b=[['' for x in range(len(FIELD_LIST)+1)] for y in range(len(SECURITY_LIST))]
+    count=0
+    
+    for l in range(len(z)):
+        a=z[l].getElement('securityData')
+        Seq_Number=[a.getValue(i).getElement('sequenceNumber').getValue(0) for i in range(a.numValues())]
+        j=0
+        for i in range(a.numValues()):
+            j=0            
+            b[i+count][0]=Seq_Number[i]
+            for field in FIELD_LIST:
+                j=j+1                
+                try:
+                    b[i+count][j]=a.getValue(i).getElement('fieldData').getElement(field).getValue(0)
+                except Exception as e:
+                    print "Exception with "+SECURITY_LIST[b[i+count][0]]+":", e
+        count=count+a.numValues()
+    b=sorted(b)
+
+    b=pd.DataFrame([[y for y in x[1:]] for x in b],index=SECURITY_LIST, columns=FIELD_LIST)
+    return b
+
+
+def messagetojson(blpapimessage):
+    
+    
+    #blpapi.message.Message -> elements
+    #blpapi.element.Element -> elements
+    
+    z=[]
+    for i in range(len(blpapimessage.numElements())):
+        z[i]=blpapimessage.getElement(i)
+        for j in range(len(z[i])):
+            MyJson=0
+    
+    MyJson=blpapimessage    
+    return MyJson
+
+#bbg data fetch
+def Dvd_History(lIdx):
+    FIELD_LIST=['EQY_DVD_HIST_GROSS','DVD_CRNCY','CRNCY']
+    
+    y={}
+    Div={}
+    Currency={}
+    divCurrency={}
+    Bbg_Data=BBG.bdp(lIdx,FIELD_LIST)
+    j=0
+    for i in range(len(lIdx)):
+        #print Bbg_Data[j]
+        if Bbg_Data[j].hasElement('securityData'):
+            if Bbg_Data[j].getElement('securityData').numValues()>=1:
+                Bbg_Data[j]=Bbg_Data[j].getElement('securityData').getValue(0)
+                if Bbg_Data[j].hasElement('sequenceNumber'):
+                    iSeq=Bbg_Data[j].getElement('sequenceNumber').getValue(0)
+                    if Bbg_Data[j].hasElement('fieldData'):
+                        if Bbg_Data[j].getElement('fieldData').hasElement(FIELD_LIST[0]):                
+                            Div[j]=Bbg_Data[j].getElement('fieldData').getElement(FIELD_LIST[0])
+                            y[lIdx[iSeq]]=[]
+                            for i in range(Div[j].numValues()):
+                                try:
+                                    z=[Div[j].getValue(i).getElementValue('Ex-Date'),\
+                                            Div[j].getValue(i).getElementValue('Dividend Amount'),\
+                                            Div[j].getValue(i).getElementValue('Dividend Type'),\
+                                            Div[j].getValue(i).getElementValue('Dividend Frequency')]
+                                    y[lIdx[iSeq]].append(z)
+                                except Exception as e:
+                                    print e
+                        if Bbg_Data[j].getElement('fieldData').hasElement('CRNCY'):
+                            Currency[lIdx[iSeq]]=Bbg_Data[j].getElement('fieldData').getElementValue('CRNCY')
+                        if Bbg_Data[j].getElement('fieldData').hasElement('DVD_CRNCY'):
+                            divCurrency[lIdx[iSeq]]=Bbg_Data[j].getElement('fieldData').getElementValue('DVD_CRNCY')
+        j=j+1    
+    for stock in lIdx:
+        if y.has_key(stock)==False:
+            y[stock]=[[datetime.date(2000,1,1),0,'xxx','xxx']]
+        if Currency.has_key(stock)==False:
+            Currency[stock]='USD'
+        if divCurrency.has_key(stock)==False:
+            divCurrency[stock]='USD'
+    return (y,Currency,divCurrency)
+
+if __name__ == "__main__":
+    print "loading"
+    SECURITY_LIST=[u'763 HK Equity',
+     u'3898 HK Equity',
+     u'YAR NO Equity',
+     u'2338 HK Equity',
+     u'TLKM IJ Equity',
+     u'TEC FP Equity',
+     u'TTM UN Equity',
+     u'017670 KS Equity',
+     u'SCC TB Equity',
+     u'2727 HK Equity',
+     u'SAND SS Equity',
+     u'POT UN Equity',
+     u'005490 KS Equity',
+     u'MOS UN Equity',
+     u'MNDI LN Equity',
+     u'6479 JT Equity',
+     u'1618 HK Equity',
+     u'003550 KS Equity',
+     u'KCHOL TI Equity',
+     u'002380 KS Equity',
+     u'INGR UN Equity',
+     u'004020 KS Equity',
+     u'000720 KS Equity',
+     u'1071 HK Equity',
+     u'GAS SM Equity',
+     u'ERICB SS Equity',
+     u'ENG SM Equity',
+     u'EDP PL Equity',
+     u'6367 JT Equity',
+     u'CMI UN Equity',
+     u'728 HK Equity',
+     u'836 HK Equity',
+     u'390 HK Equity',
+     u'1186 HK Equity',
+     u'1800 HK Equity',
+     u'BVT SJ Equity',
+     u'ATCOA SS Equity',
+     u'MAERSKB DC Equity',
+     u'ALO FP Equity',
+     u'AES UN Equity']
+    FIELD_LIST=['PX_LAST','TICKER_AND_EXCH_CODE','DVD_SH_LAST','DVD_EX_DT']
+    #z=MyBDP(SECURITY_LIST,FIELD_LIST)
+   
+#===bdp2===
+
+# SimpleRefDataExample.py
+
+import blpapi, datetime
+from optparse import OptionParser
+
+
+def parseCmdLine():
+    parser = OptionParser(description="Retrieve reference data.")
+    parser.add_option("-a",
+                      "--ip",
+                      dest="host",
+                      help="server name or IP (default: %default)",
+                      metavar="ipAddress",
+                      default="localhost")
+    parser.add_option("-p",
+                      dest="port",
+                      type="int",
+                      help="server port (default: %default)",
+                      metavar="tcpPort",
+                      default=8194)
+
+    (options, args) = parser.parse_args()
+
+    return options
+       
+def bdp2(SECURITY_LIST,FIELD_LIST,As_Of_Date=None,FX=None):
+    global options
+    options = parseCmdLine()
+
+    # Fill SessionOptions
+    sessionOptions = blpapi.SessionOptions()
+    sessionOptions.setServerHost(options.host)
+    sessionOptions.setServerPort(options.port)
+
+    print "Connecting to %s:%d" % (options.host, options.port)
+
+    # Create a Session
+    session = blpapi.Session(sessionOptions)
+
+    # Start a Session
+    if not session.start():
+        print "Failed to start session."
+        return
+
+    if not session.openService("//blp/refdata"):
+        print "Failed to open //blp/refdata"
+        return
+
+    refDataService = session.getService("//blp/refdata")
+    request = refDataService.createRequest("ReferenceDataRequest")
+
+    # append securities to request
+    for x in SECURITY_LIST:
+        request.append("securities",x)
+
+    # append fields to request
+    for x in FIELD_LIST:
+        request.append("fields", x)
+    #request.append("fields", "EQY_DPS")
+        
+        
+    if type(As_Of_Date)==datetime.date:
+            As_Of_Date=As_Of_Date.strftime('%Y%m%d')
+    #request.append("fields", 'END_DATE_OVERRIDE='+As_Of_Date)
+    
+    
+    #-----input overrides-----
+    overrides = request.getElement("overrides")
+
+    if As_Of_Date!=None:
+        override1 = overrides.appendElement()
+        override1.setElement("fieldId", "END_DATE_OVERRIDE")
+        override1.setElement("value", As_Of_Date)
+    
+    if FX!=None:
+        override2 = overrides.appendElement()
+        override2.setElement("fieldId", "FX")
+        override2.setElement("value", FX)
+   #-----input overrides-----end
+   
+    #print "Sending Request:", request
+    cid=session.sendRequest(request)
+    iev=0
+    session_data=['']*(len(SECURITY_LIST))
+
+    try:
+        # Process received events
+        while(True):
+            # We provide timeout to give the chance to Ctrl+C handling:
+            ev = session.nextEvent(500)
+            if ev.eventType() != blpapi.Event.RESPONSE and ev.eventType() != blpapi.Event.PARTIAL_RESPONSE:
+                continue
+            else:            
+                for msg in ev:
+                    #print msg
+                    if cid in msg.correlationIds():
+                        session_data[iev]=msg
+                        iev=iev+1                      
+            # Response completly received, so we could exit
+            if ev.eventType() == blpapi.Event.RESPONSE:
+                break
+    finally:
+        z=[x for x in session_data if x]
+        return z
+        # Stop the session
+        session.stop()
+
+def MyBDP2(SECURITY_LIST,FIELD_LIST,AsOfDate=datetime.datetime.now()):
+    
+    #SECURITY_DATA = blpapi.Name("securityData")
+    #SECURITY = blpapi.Name("security")
+    #FIELD_DATA = blpapi.Name("fieldData")
+    #FIELD_EXCEPTIONS = blpapi.Name("fieldExceptions")
+    #FIELD_ID = blpapi.Name("fieldId")
+    #ERROR_INFO = blpapi.Name("errorInfo")    
+    
+    try:
+        z=bdp2(SECURITY_LIST,FIELD_LIST,AsOfDate)
+    except KeyboardInterrupt:
+        print "Ctrl+C pressed. Stopping..."
+    
+    b=[['' for x in range(len(FIELD_LIST)+1)] for y in range(len(SECURITY_LIST))]
+    count=0
+    
+    for l in range(len(z)):
+        a=z[l].getElement('securityData')
+        Seq_Number=[a.getValue(i).getElement('sequenceNumber').getValue(0) for i in range(a.numValues())]
+        j=0
+        for i in range(a.numValues()):
+            j=0            
+            b[i+count][0]=Seq_Number[i]
+            for field in FIELD_LIST:
+                j=j+1                
+                try:
+                    b[i+count][j]=[a.getValue(i).getElement('fieldData').getElement(field).\
+                                    getValue(ii) for ii in range(0,a.getValue(i).getElement('fieldData').\
+                                    getElement(field).numValues())]
+                except Exception as e:
+                    print "Exception with ", e#+SECURITY_LIST[b[i+count][0]]+":", e
+        count=count+a.numValues()
+    return sorted(b)
+
+if __name__ == "__main__":
+    print "loading"
+    SECURITY_LIST=[u'SXXP Index']
+    FIELD_LIST=['INDX_MWEIGHT_HIST']
+    #z=bdp2(SECURITY_LIST,FIELD_LIST,'20160105')
+    z=MyBDP2(SECURITY_LIST,FIELD_LIST,'20160105')
+	
+#===bdh_multi===
+
+# SimpleHistoryExample.py
+
+import blpapi
+from optparse import OptionParser
+import sys
+import pandas as pd
+import datetime
+import numpy  as np
+import UsefullMaths
+
+
+def parseCmdLine():
+    parser = OptionParser(description="Retrieve reference data.")
+    parser.add_option("-a",
+                      "--ip",
+                      dest="host",
+                      help="server name or IP (default: %default)",
+                      metavar="ipAddress",
+                      default="localhost")
+    parser.add_option("-p",
+                      dest="port",
+                      type="int",
+                      help="server port (default: %default)",
+                      metavar="tcpPort",
+                      default=8194)
+
+    (options, args) = parser.parse_args()
+
+    return options
+
+def BDH(x1,x2,x3,x4,FX=None):
+    
+#        x1=['AAL LN Equity','AALB NA Equity']
+#        x2 = '20150923'
+#        x3 = '20150924'
+#        x4 = 'PX_LAST'
+    
+     options = parseCmdLine()
+ 
+     # Fill SessionOptions
+     sessionOptions = blpapi.SessionOptions()
+     sessionOptions.setServerHost(options.host)
+     sessionOptions.setServerPort(options.port)
+ 
+     print "Connecting to %s:%s" % (options.host, options.port)
+     # Create a Session
+     session = blpapi.Session(sessionOptions)
+ 
+     # Start a Session
+     if not session.start():
+         print "Failed to start session."
+         return
+ 
+     try:
+         # Open service to get historical data from
+         if not session.openService("//blp/refdata"):
+             print "Failed to open //blp/refdata"
+             return
+ 
+         # Obtain previously opened service
+         refDataService = session.getService("//blp/refdata")
+ 
+         # Create and fill the request for the historical data
+         request = refDataService.createRequest("HistoricalDataRequest")
+         for i in range(0,len(x1)):
+             request.getElement("securities").appendValue(x1[i])
+         
+         if isinstance(x4,str):
+             request.getElement("fields").appendValue(x4)   
+         else:
+             for x in x4:
+                 request.getElement("fields").appendValue(x)    
+
+
+         request.set("periodicitySelection", "DAILY")
+         request.set("startDate", x2)
+         request.set("endDate", x3)
+         
+         if FX!=None:
+            request.set("currency",FX)
+ 
+         #print "Sending Request:", request
+         # Send the request
+         cid=session.sendRequest(request)
+         iev=0
+         session_data=['']*(len(x1))
+         session_clean_data=['']*(len(x1))
+         text=''
+         
+         # Process received events
+         while(True):
+             # We provide timeout to give the chance for Ctrl+C handling:
+             ev = session.nextEvent(500)
+             #print ev.eventType()
+             if ev.eventType() != blpapi.Event.RESPONSE and \
+                     ev.eventType() != blpapi.Event.PARTIAL_RESPONSE:
+                 continue
+             else:
+                 for msg in ev:
+                     #print msg
+                     if cid in msg.correlationIds():
+                         session_data[iev]=msg
+                         iev=iev+1
+ 
+             if ev.eventType() == blpapi.Event.RESPONSE:
+                 # Response completly received, so we could exit
+                 break
+     finally:
+         # Stop the session
+         session.stop()
+     return session_data
+
+def isElemOrValue(blpMessage):
+    isElement=False
+    isValue=False    
+    if 'numElements' in dir(blpMessage):
+        if blpMessage.numElements()>0:
+            isElement=True
+    if 'numValues' in dir(blpMessage):
+        if blpMessage.numValues()>0:
+            isValue=True
+    return (isValue,isElement)
+    
+def getElemOrValue(blpMessage):
+    (isValue,isElement)=isElemOrValue(blpMessage)
+    elem=None  
+    value=None
+    if isElement:
+        elem=[blpMessage.getElement(i) for i in range(blpMessage.numElements())]
+    if isValue:
+        value=[blpMessage.getValue(i) for i in range(blpMessage.numValues())]
+    return(value,elem)
+
+#this functions deals with the bbg message for Histo data:
+def bdhMessagToDf(session_data,x1,x2,x3,x4):
+    dictField={}
+    y={}
+    for field in x4:
+        #dictField[field]=pd.DataF
+        for j in range(len(x1)):
+            index=session_data[j].getElement('securityData').getElementAsString('security')
+            prices=[]
+            dates=[]
+            error=[]
+            window=session_data[j].getElement('securityData').getElement('fieldData').numValues()
+            for i in range(window):
+                try:
+                    prices.append(session_data[j].getElement('securityData').getElement('fieldData').getValue(i).getElementAsFloat(field))
+                    dates.append(session_data[j].getElement('securityData').getElement('fieldData').getValue(i).getElementAsDatetime('date'))
+                except Exception as e:
+                    error.append(e)
+            y[index]=pd.Series(prices,index=dates,name=index)
+            y[index]=y[index].dropna()
+        print field        
+        dictField[field]=pd.concat(y,axis=1)
+        y=None
+        prices=None
+        dates=None
+        y={}        
+        
+    return dictField
+        
+def MyBDH(x1,x2,x3,x4,FX=None):
+    try:
+#        x1=['AAL LN Equity','AALB NA Equity']
+#        x2 = '20150923'
+#        x3 = '20150924'
+#        x4 = 'PX_LAST'
+        session_clean_data=['']*(len(x1))
+        size=['']*(len(x1))
+        outDates=['']*(len(x1))
+        outData=['']*(len(x1))        
+        if type(x2)==datetime.date:
+            x2=x2.strftime('%Y%m%d')
+        if type(x3)==datetime.date:
+            x3=x3.strftime('%Y%m%d')           
+        session_data=BDH(x1,x2,x3,x4,FX)
+        text=''        
+        for j in range(0,len(x1)):
+            session_data_SequenceNumber=session_data[j].getElement('securityData').getElement('sequenceNumber').getValueAsInteger(0)
+            session_clean_data[session_data_SequenceNumber]=session_data[j].getElement('securityData').getElement('fieldData')
+            size[session_data_SequenceNumber]=session_clean_data[session_data_SequenceNumber].numValues()
+            fieldDataList = [session_clean_data[session_data_SequenceNumber].getValueAsElement(i) for i in range(0,size[session_data_SequenceNumber])]
+            outDates[session_data_SequenceNumber] = [x.getElementAsDatetime('date') for x in fieldDataList]
+            if isinstance(x4,str):
+                outData[session_data_SequenceNumber] = [x.getElementAsFloat(x4) for x in fieldDataList]
+            else:
+                print 'x4 needs to be a string'
+        return [outDates,outData]
+        
+    except KeyboardInterrupt:
+        print "Ctrl+C pressed. Stopping..."
+        
+
+def BDH_pd(x1=['AAL LN Equity','AALB NA Equity'],x2='20150923',x3='20150924',x4='PX_LAST',FX=None):
+    try:
+#        x1=['AAL LN Equity','AALB NA Equity']
+#        x2 = '20150923'
+#        x3 = '20150924'
+#        x4 = 'PX_LAST' or ['PX_LAST','PX_BID','PX_ASK']        
+        if type(x2) in [datetime.date,datetime.datetime,pd.tslib.Timestamp]:
+            x2=x2.strftime('%Y%m%d')
+        if type(x3) in [datetime.date,datetime.datetime,pd.tslib.Timestamp]:
+            x3=x3.strftime('%Y%m%d')    
+        session_data=BDH(x1,x2,x3,x4,FX)
+        
+        if isinstance(x4,str):
+            z=bdhMessagToDf(session_data,x1,x2,x3,[x4])
+            z[x4].index=pd.to_datetime(z[x4].index)
+            return z[x4]
+        else:
+            z=bdhMessagToDf(session_data,x1,x2,x3,x4)
+            for key in z.keys():
+                z[key].index=pd.to_datetime(z[key].index)
+            return z
+        
+    except KeyboardInterrupt:
+        print "Ctrl+C pressed. Stopping..."
+
+def BDH_indexoption_pd(index,maturity,callput,x2,x3,x4):
+    """ return for a given index and maturity the available universe of BBG strikes and return its values.
+        index= strikes sorted in ascendant order
+        columns= valuation dates
+    """    
+    try:
+#        x1=['AAL LN Equity','AALB NA Equity']
+#        index='SPX'
+#        maturity=datetime.date(2012,10,15)
+#        callput='C'
+#        x2 = '20150923'
+#        x3 = '20150924'
+#        x4 = 'PX_LAST'
+        optionuniverse=UsefullMaths.get_BBGoptionuniverse(index)
+        session_clean_data=['']*(len(optionuniverse))
+        size=['']*(len(optionuniverse))
+        outDates=['']*(len(optionuniverse))
+        outData=['']*(len(optionuniverse))
+        bbg_pd=['']*(len(optionuniverse))
+        BBGrics=[UsefullMaths.BBGOptionTicker(index,x,maturity,callput) for x in optionuniverse]
+        session_data=BDH(BBGrics,x2,x3,x4)
+        
+        for j in range(0,len(optionuniverse)):
+            session_data_SequenceNumber=session_data[j].getElement('securityData').getElement('sequenceNumber').getValueAsInteger(0)
+            session_clean_data[session_data_SequenceNumber]=session_data[j].getElement('securityData').getElement('fieldData')
+            size[session_data_SequenceNumber]=session_clean_data[session_data_SequenceNumber].numValues()
+            fieldDataList = [session_clean_data[session_data_SequenceNumber].getValueAsElement(i) for i in range(0,size[session_data_SequenceNumber])]
+            outDates[session_data_SequenceNumber] = [x.getElementAsDatetime('date') for x in fieldDataList]
+            outData[session_data_SequenceNumber] = [x.getElementAsFloat(x4) for x in fieldDataList]
+            ric=session_data[j].getElement('securityData').getElementAsString('security')
+            bbg_pd[session_data_SequenceNumber]=pd.Series(outData[session_data_SequenceNumber], index=outDates[session_data_SequenceNumber], name=UsefullMaths.GetStrikeFromBBG(ric))
+        y=pd.concat(bbg_pd,axis=1)
+        y=y.T
+        y=y.sort()
+#        return [bbg_pd,y]
+        return y        
+    except KeyboardInterrupt:
+        print "Ctrl+C pressed. Stopping..."   
+
+
+if __name__ == "__main__":
+#    cac_fts=MyBDH(['UX'+str(i)+' Index' for i in range(10)][1:8],'20070101','20160218',['PX_LAST','PX_BID','PX_ASK'],FX=None)
+    x1=['UX'+str(i)+' Index' for i in range(10)][1:8]
+    x2='20070101'
+    x3=datetime.date.today()
+    x4=['PX_LAST','PX_BID','PX_ASK']
+    FX=None
+	

@@ -1,0 +1,89 @@
+
+#***htmlVisulatisation***#
+
+#===wrapper===
+
+import pandas as pd
+import mySqlite,  sqlite3
+
+
+def toHtml(df):
+    htmlBody="""  <html>
+  <head>
+  <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+  <div id="chart_div" style="margin-left:auto;margin-right:auto;height: 80%;"></div>
+
+   <script type="text/javascript">
+google.charts.load('current', {packages: ['corechart', 'line']});
+google.charts.setOnLoadCallback(drawCurveTypes);
+
+function drawCurveTypes() {
+      var data = new google.visualization.DataTable();"""+addColumns(df)+"""
+      data.addRows("""+addRows(df)+"""
+      );
+      
+      var options = {
+      
+      
+        title: 'Historical Data',
+        legend: { position: 'bottom' },             
+        hAxis: {
+          format: 'd/MMM/yy',
+          title: 'time'
+        },
+        vAxis: {
+          title: 'P&L'
+        },
+        series: {
+          1: {curveType: 'function'}
+        }
+      };
+
+      var chart = new google.visualization.LineChart(document.getElementById('chart_div'));
+      chart.draw(data, options);
+    }
+    </script>
+  </head>
+  <body>
+    <div id="curve_chart" style="margin-left:auto;margin-right:auto;height: 400%;"></div>
+  </body>
+</html>"""
+
+    return htmlBody
+
+def addColumns(df):
+    text="data.addColumn('date','Time of Day');data.addColumn('number','"
+    for x in df.columns[:-1]:
+        text+=str(x)+"');data.addColumn('number','"
+    text+=str(df.columns[-1])+"');"
+    return text
+    
+    
+def addRows(df):
+    df=df.fillna(method='pad')
+    df['date']=pd.to_datetime(df.index)
+    #df['date']=[float(x)/86400000000000 for x in df['date'].values]
+    #df['date']=['new Date('+x.strftime('%Y, %m, %d')+')' for x in df['date']]
+    df['date']=['new Date('+','.join([str(x.year),str(x.month-1),str(x.day)])+')' for x in df['date']]    
+    cols = df.columns.tolist()
+    cols = cols[-1:] + cols[:-1]
+    df = df[cols]
+    m=df.as_matrix()
+    m.tolist()
+    df=df.drop(['date'],1)
+    y=str(m.tolist()).replace("'",'')
+    return y
+    
+def saveDfToHtmlGraph(df,path='C:\\temp\\graph.html'):
+    htmlBody=toHtml(df)
+    text_file = open(path, "wb")
+    text_file.write(htmlBody)
+    text_file.close()
+
+if __name__=='__main__':
+    conn=sqlite3.connect(mySqlite.path)
+    df=mySqlite.BDH_pd(conn,['SPX Index','SX5E Index','VIX Index'],'20100102','20160412','PX_LAST')
+    df=df/df.iloc[0]
+    saveDfToHtmlGraph(df)
+    conn.close()
+	
