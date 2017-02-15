@@ -1,0 +1,8 @@
+def send_mail_via_com(text, subject, recipient, profilename="Outlook2003"):
+    o = win32com.client.Dispatch('Outlook.Application')
+    Msg = o.CreateItem(0)
+    Msg.To = recipient
+    Msg.Subject = subject
+    Msg.HTMLBody = text
+    #Msg.Display()
+    Msg.Send()
